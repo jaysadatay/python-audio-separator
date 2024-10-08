@@ -37,12 +37,10 @@ class Separator:
         output_dir (str): The directory where output files will be saved.
         output_format (str): The format of the output audio file.
         output_bitrate (str): The bitrate of the output audio file.
-        amplification_threshold (float): The threshold for audio amplification.
         normalization_threshold (float): The threshold for audio normalization.
         output_single_stem (str): Option to output a single stem.
         invert_using_spec (bool): Flag to invert using spectrogram.
         sample_rate (int): The sample rate of the audio.
-        use_soundfile (bool): Use soundfile for audio writing, can solve OOM issues.
 
     MDX Architecture Specific Attributes:
         hop_length (int): The hop length for STFT.
@@ -73,11 +71,9 @@ class Separator:
         output_format="WAV",
         output_bitrate=None,
         normalization_threshold=0.9,
-        amplification_threshold=0.6,
         output_single_stem=None,
         invert_using_spec=False,
         sample_rate=44100,
-        use_soundfile=False,
         mdx_params={"hop_length": 1024, "segment_size": 256, "overlap": 0.25, "batch_size": 1, "enable_denoise": False},
         vr_params={"batch_size": 1, "window_size": 512, "aggression": 5, "enable_tta": False, "enable_post_process": False, "post_process_threshold": 0.2, "high_end_process": False},
         demucs_params={"segment_size": "Default", "shifts": 2, "overlap": 0.25, "segments_enabled": True},
@@ -127,10 +123,6 @@ class Separator:
         self.normalization_threshold = normalization_threshold
         if normalization_threshold <= 0 or normalization_threshold > 1:
             raise ValueError("The normalization_threshold must be greater than 0 and less than or equal to 1.")
-        
-        self.amplification_threshold = amplification_threshold
-        if amplification_threshold <= 0 or amplification_threshold > 1:
-            raise ValueError("The amplification_threshold must be greater than 0 and less than or equal to 1.")
 
         self.output_single_stem = output_single_stem
         if output_single_stem is not None:
@@ -148,8 +140,6 @@ class Separator:
                 raise ValueError(f"The sample rate setting is {self.sample_rate}. Enter something less ambitious.")
         except ValueError:
             raise ValueError("The sample rate must be a non-zero whole number. Please provide a valid integer.")
-        
-        self.use_soundfile = use_soundfile
 
         # These are parameters which users may want to configure so we expose them to the top-level Separator class,
         # even though they are specific to a single model architecture
@@ -405,6 +395,7 @@ class Separator:
             "MDXC": {
                 **model_downloads_list["mdx23c_download_list"],
                 **model_downloads_list["mdx23c_download_vip_list"],
+                **audio_separator_models_list["mdx23c_download_list"],
                 **model_downloads_list["roformer_download_list"],
                 **audio_separator_models_list["roformer_download_list"],
             },
@@ -430,6 +421,7 @@ class Separator:
         vip_model_repo_url_prefix = "https://github.com/Anjok0109/ai_magic/releases/download/v5"
 
         audio_separator_models_repo_url_prefix = "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs"
+        additional_models_repo_url_prefix = "https://github.com/jaysadatay/python-audio-separator/releases/download/models"
 
         yaml_config_filename = None
 
@@ -448,7 +440,11 @@ class Separator:
                         self.download_file_if_not_exists(f"{model_repo_url_prefix}/{model_filename}", model_path)
                     except RuntimeError:
                         self.logger.debug("Model not found in UVR repo, attempting to download from audio-separator models repo...")
-                        self.download_file_if_not_exists(f"{audio_separator_models_repo_url_prefix}/{model_filename}", model_path)
+                        try:
+                            self.download_file_if_not_exists(f"{audio_separator_models_repo_url_prefix}/{model_filename}", model_path)
+                        except RuntimeError:
+                            self.logger.debug("Model not found in repos, attempting to download from jaysadatay models repo...")
+                            self.download_file_if_not_exists(f"{additional_models_repo_url_prefix}/{model_filename}", model_path)
 
                     self.print_uvr_vip_message()
 
@@ -485,8 +481,13 @@ class Separator:
                                     self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
                                 except RuntimeError:
                                     self.logger.debug("Model not found in UVR repo, attempting to download from audio-separator models repo...")
-                                    download_url = f"{audio_separator_models_repo_url_prefix}/{config_key}"
-                                    self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
+                                    try:
+                                        download_url = f"{audio_separator_models_repo_url_prefix}/{config_key}"
+                                        self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
+                                    except RuntimeError:
+                                        self.logger.debug("Model not found in repos, attempting to download from jaysadatay models repo...")
+                                        download_url = f"{additional_models_repo_url_prefix}/{config_key}"
+                                        self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
 
                                 # In case the user specified the YAML filename as the model input instead of the model filename, correct that
                                 if model_filename.endswith(".yaml"):
@@ -507,8 +508,13 @@ class Separator:
                                     self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
                                 except RuntimeError:
                                     self.logger.debug("Model YAML config file not found in UVR repo, attempting to download from audio-separator models repo...")
-                                    yaml_config_url = f"{audio_separator_models_repo_url_prefix}/{yaml_config_filename}"
-                                    self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
+                                    try:
+                                        yaml_config_url = f"{audio_separator_models_repo_url_prefix}/{yaml_config_filename}"
+                                        self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
+                                    except RuntimeError:
+                                        self.logger.debug("Model YAML config file not found in repos, attempting to download from jaysadatay models repo...")
+                                        yaml_config_url = f"{additional_models_repo_url_prefix}/{yaml_config_filename}"
+                                        self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
 
                             # MDX and VR models have config_value set to the model filename
                             else:
@@ -694,11 +700,9 @@ class Separator:
             "output_bitrate": self.output_bitrate,
             "output_dir": self.output_dir,
             "normalization_threshold": self.normalization_threshold,
-            "amplification_threshold": self.amplification_threshold,
             "output_single_stem": self.output_single_stem,
             "invert_using_spec": self.invert_using_spec,
             "sample_rate": self.sample_rate,
-            "use_soundfile": self.use_soundfile
         }
 
         # Instantiate the appropriate separator class depending on the model type
@@ -742,7 +746,6 @@ class Separator:
         separate_start_time = time.perf_counter()
 
         self.logger.debug(f"Normalization threshold set to {self.normalization_threshold}, waveform will lowered to this max amplitude to avoid clipping.")
-        self.logger.debug(f"Amplification threshold set to {self.amplification_threshold}, waveform will scaled up to this max amplitude if below it.")
 
         # Run separation method for the loaded model
         output_files = self.model_instance.separate(audio_file_path)
