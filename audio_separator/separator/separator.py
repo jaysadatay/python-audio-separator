@@ -380,7 +380,7 @@ class Separator:
         # }
 
         # Only show Demucs v4 models as we've only implemented support for v4
-        filtered_demucs_v4 = {key: value for key, value in model_downloads_list["demucs_download_list"].items() if key.startswith("Demucs v4")}
+        #filtered_demucs_v4 = {key: value for key, value in model_downloads_list["demucs_download_list"].items() if key.startswith("Demucs v4")}
 
         # Load the JSON file using importlib.resources
         with resources.open_text("audio_separator", "models.json") as f:
@@ -391,7 +391,10 @@ class Separator:
         model_files_grouped_by_type = {
             "VR": {**model_downloads_list["vr_download_list"], **audio_separator_models_list["vr_download_list"]},
             "MDX": {**model_downloads_list["mdx_download_list"], **model_downloads_list["mdx_download_vip_list"], **audio_separator_models_list["mdx_download_list"]},
-            "Demucs": filtered_demucs_v4,
+            "Demucs": {
+                **model_downloads_list["demucs_download_list"],
+                **audio_separator_models_list["demucs_download_list"],
+             },
             "MDXC": {
                 **model_downloads_list["mdx23c_download_list"],
                 **model_downloads_list["mdx23c_download_vip_list"],
