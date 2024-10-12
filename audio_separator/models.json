@@ -10,6 +10,10 @@
         "DrumSep: HDemucs": {
             "drumsep.th": "https://github.com/jaysadatay/python-audio-separator/releases/download/models/drumsep.th",
             "drumsep.yaml": "https://github.com/jaysadatay/python-audio-separator/releases/download/models/drumsep.yaml"
+        },
+        "HTDemucs_ft: Drums": {
+            "htdemucs_ft_drums.th": "https://github.com/jaysadatay/python-audio-separator/releases/download/models/htdemucs_ft_drums.th",
+            "htdemucs_ft_drums.th.yaml": "https://github.com/jaysadatay/python-audio-separator/releases/download/models/htdemucs_ft_drums.th.yaml"
         }
     },
     "roformer_download_list": {
