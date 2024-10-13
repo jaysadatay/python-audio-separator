@@ -13,7 +13,7 @@
         },
         "HTDemucs_ft: Drums": {
             "htdemucs_ft_drums.th": "https://github.com/jaysadatay/python-audio-separator/releases/download/models/htdemucs_ft_drums.th",
-            "htdemucs_ft_drums.th.yaml": "https://github.com/jaysadatay/python-audio-separator/releases/download/models/htdemucs_ft_drums.th.yaml"
+            "htdemucs_ft_drums.yaml": "https://github.com/jaysadatay/python-audio-separator/releases/download/models/htdemucs_ft_drums.yaml"
         }
     },
     "roformer_download_list": {
