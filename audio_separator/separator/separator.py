@@ -15,6 +15,7 @@ import json
 import yaml
 import requests
 import torch
+import torch.amp.autocast_mode as autocast_mode
 import onnxruntime as ort
 from tqdm import tqdm
 
@@ -37,10 +38,13 @@ class Separator:
         output_dir (str): The directory where output files will be saved.
         output_format (str): The format of the output audio file.
         output_bitrate (str): The bitrate of the output audio file.
+        amplification_threshold (float): The threshold for audio amplification.
         normalization_threshold (float): The threshold for audio normalization.
         output_single_stem (str): Option to output a single stem.
         invert_using_spec (bool): Flag to invert using spectrogram.
         sample_rate (int): The sample rate of the audio.
+        use_soundfile (bool): Use soundfile for audio writing, can solve OOM issues.
+        use_autocast (bool): Flag to use PyTorch autocast for faster inference.
 
     MDX Architecture Specific Attributes:
         hop_length (int): The hop length for STFT.
@@ -59,7 +63,17 @@ class Separator:
         high_end_process: False
 
     Demucs Architecture Specific Attributes & Defaults:
-        model_path: The path to the Demucs model file.
+        segment_size: "Default"
+        shifts: 2
+        overlap: 0.25
+        segments_enabled: True
+        
+    MDXC Architecture Specific Attributes & Defaults:
+        segment_size: 256
+        override_model_segment_size: False
+        batch_size: 1
+        overlap: 8
+        pitch_shift: 0
     """
 
     def __init__(
@@ -71,13 +85,16 @@ class Separator:
         output_format="WAV",
         output_bitrate=None,
         normalization_threshold=0.9,
+        amplification_threshold=0.6,
         output_single_stem=None,
         invert_using_spec=False,
         sample_rate=44100,
+        use_soundfile=False,
+        use_autocast=False,
         mdx_params={"hop_length": 1024, "segment_size": 256, "overlap": 0.25, "batch_size": 1, "enable_denoise": False},
         vr_params={"batch_size": 1, "window_size": 512, "aggression": 5, "enable_tta": False, "enable_post_process": False, "post_process_threshold": 0.2, "high_end_process": False},
         demucs_params={"segment_size": "Default", "shifts": 2, "overlap": 0.25, "segments_enabled": True},
-        mdxc_params={"segment_size": 256, "batch_size": 1, "overlap": 8},
+        mdxc_params={"segment_size": 256, "override_model_segment_size": False, "batch_size": 1, "overlap": 8, "pitch_shift": 0},
     ):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(log_level)
@@ -123,6 +140,10 @@ class Separator:
         self.normalization_threshold = normalization_threshold
         if normalization_threshold <= 0 or normalization_threshold > 1:
             raise ValueError("The normalization_threshold must be greater than 0 and less than or equal to 1.")
+        
+        self.amplification_threshold = amplification_threshold
+        if amplification_threshold <= 0 or amplification_threshold > 1:
+            raise ValueError("The amplification_threshold must be greater than 0 and less than or equal to 1.")
 
         self.output_single_stem = output_single_stem
         if output_single_stem is not None:
@@ -140,6 +161,9 @@ class Separator:
                 raise ValueError(f"The sample rate setting is {self.sample_rate}. Enter something less ambitious.")
         except ValueError:
             raise ValueError("The sample rate must be a non-zero whole number. Please provide a valid integer.")
+        
+        self.use_soundfile = use_soundfile
+        self.use_autocast = use_autocast
 
         # These are parameters which users may want to configure so we expose them to the top-level Separator class,
         # even though they are specific to a single model architecture
@@ -380,7 +404,7 @@ class Separator:
         # }
 
         # Only show Demucs v4 models as we've only implemented support for v4
-        #filtered_demucs_v4 = {key: value for key, value in model_downloads_list["demucs_download_list"].items() if key.startswith("Demucs v4")}
+        filtered_demucs_v4 = {key: value for key, value in model_downloads_list["demucs_download_list"].items() if key.startswith("Demucs v4")}
 
         # Load the JSON file using importlib.resources
         with resources.open_text("audio_separator", "models.json") as f:
@@ -391,14 +415,10 @@ class Separator:
         model_files_grouped_by_type = {
             "VR": {**model_downloads_list["vr_download_list"], **audio_separator_models_list["vr_download_list"]},
             "MDX": {**model_downloads_list["mdx_download_list"], **model_downloads_list["mdx_download_vip_list"], **audio_separator_models_list["mdx_download_list"]},
-            "Demucs": {
-                **model_downloads_list["demucs_download_list"],
-                **audio_separator_models_list["demucs_download_list"],
-             },
+            "Demucs": filtered_demucs_v4,
             "MDXC": {
                 **model_downloads_list["mdx23c_download_list"],
                 **model_downloads_list["mdx23c_download_vip_list"],
-                **audio_separator_models_list["mdx23c_download_list"],
                 **model_downloads_list["roformer_download_list"],
                 **audio_separator_models_list["roformer_download_list"],
             },
@@ -424,7 +444,6 @@ class Separator:
         vip_model_repo_url_prefix = "https://github.com/Anjok0109/ai_magic/releases/download/v5"
 
         audio_separator_models_repo_url_prefix = "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs"
-        additional_models_repo_url_prefix = "https://github.com/jaysadatay/python-audio-separator/releases/download/models"
 
         yaml_config_filename = None
 
@@ -443,11 +462,7 @@ class Separator:
                         self.download_file_if_not_exists(f"{model_repo_url_prefix}/{model_filename}", model_path)
                     except RuntimeError:
                         self.logger.debug("Model not found in UVR repo, attempting to download from audio-separator models repo...")
-                        try:
-                            self.download_file_if_not_exists(f"{audio_separator_models_repo_url_prefix}/{model_filename}", model_path)
-                        except RuntimeError:
-                            self.logger.debug("Model not found in repos, attempting to download from jaysadatay models repo...")
-                            self.download_file_if_not_exists(f"{additional_models_repo_url_prefix}/{model_filename}", model_path)
+                        self.download_file_if_not_exists(f"{audio_separator_models_repo_url_prefix}/{model_filename}", model_path)
 
                     self.print_uvr_vip_message()
 
@@ -484,13 +499,8 @@ class Separator:
                                     self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
                                 except RuntimeError:
                                     self.logger.debug("Model not found in UVR repo, attempting to download from audio-separator models repo...")
-                                    try:
-                                        download_url = f"{audio_separator_models_repo_url_prefix}/{config_key}"
-                                        self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
-                                    except RuntimeError:
-                                        self.logger.debug("Model not found in repos, attempting to download from jaysadatay models repo...")
-                                        download_url = f"{additional_models_repo_url_prefix}/{config_key}"
-                                        self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
+                                    download_url = f"{audio_separator_models_repo_url_prefix}/{config_key}"
+                                    self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
 
                                 # In case the user specified the YAML filename as the model input instead of the model filename, correct that
                                 if model_filename.endswith(".yaml"):
@@ -511,13 +521,8 @@ class Separator:
                                     self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
                                 except RuntimeError:
                                     self.logger.debug("Model YAML config file not found in UVR repo, attempting to download from audio-separator models repo...")
-                                    try:
-                                        yaml_config_url = f"{audio_separator_models_repo_url_prefix}/{yaml_config_filename}"
-                                        self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
-                                    except RuntimeError:
-                                        self.logger.debug("Model YAML config file not found in repos, attempting to download from jaysadatay models repo...")
-                                        yaml_config_url = f"{additional_models_repo_url_prefix}/{yaml_config_filename}"
-                                        self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
+                                    yaml_config_url = f"{audio_separator_models_repo_url_prefix}/{yaml_config_filename}"
+                                    self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
 
                             # MDX and VR models have config_value set to the model filename
                             else:
@@ -703,9 +708,11 @@ class Separator:
             "output_bitrate": self.output_bitrate,
             "output_dir": self.output_dir,
             "normalization_threshold": self.normalization_threshold,
+            "amplification_threshold": self.amplification_threshold,
             "output_single_stem": self.output_single_stem,
             "invert_using_spec": self.invert_using_spec,
             "sample_rate": self.sample_rate,
+            "use_soundfile": self.use_soundfile
         }
 
         # Instantiate the appropriate separator class depending on the model type
@@ -730,7 +737,7 @@ class Separator:
         self.logger.debug("Loading model completed.")
         self.logger.info(f'Load model duration: {time.strftime("%H:%M:%S", time.gmtime(int(time.perf_counter() - load_model_start_time)))}')
 
-    def separate(self, audio_file_path):
+    def separate(self, audio_file_path, primary_output_name=None, secondary_output_name=None):
         """
         Separates the audio file into different stems (e.g., vocals, instruments) using the loaded model.
 
@@ -740,18 +747,31 @@ class Separator:
 
         Parameters:
         - audio_file_path (str): The path to the audio file to be separated.
+        - primary_output_name (str, optional): Custom name for the primary output file. Defaults to None.
+        - secondary_output_name (str, optional): Custom name for the secondary output file. Defaults to None.
 
         Returns:
         - output_files (list of str): A list containing the paths to the separated audio stem files.
         """
+        if not (self.torch_device and self.model_instance):
+            raise ValueError("Initialization failed or model not loaded. Please load a model before attempting to separate.")
+
         # Starting the separation process
         self.logger.info(f"Starting separation process for audio_file_path: {audio_file_path}")
         separate_start_time = time.perf_counter()
 
         self.logger.debug(f"Normalization threshold set to {self.normalization_threshold}, waveform will lowered to this max amplitude to avoid clipping.")
+        self.logger.debug(f"Amplification threshold set to {self.amplification_threshold}, waveform will scaled up to this max amplitude if below it.")
 
-        # Run separation method for the loaded model
-        output_files = self.model_instance.separate(audio_file_path)
+        # Run separation method for the loaded model with autocast enabled if supported by the device.
+        output_files = None
+        if self.use_autocast and autocast_mode.is_autocast_available(self.torch_device.type):
+            self.logger.debug("Autocast available.")
+            with autocast_mode.autocast(self.torch_device.type):
+                output_files = self.model_instance.separate(audio_file_path, primary_output_name, secondary_output_name)
+        else:
+            self.logger.debug("Autocast unavailable.")
+            output_files = self.model_instance.separate(audio_file_path, primary_output_name, secondary_output_name)
 
         # Clear GPU cache to free up memory
         self.model_instance.clear_gpu_cache()
