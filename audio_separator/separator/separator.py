@@ -419,6 +419,7 @@ class Separator:
             "MDXC": {
                 **model_downloads_list["mdx23c_download_list"],
                 **model_downloads_list["mdx23c_download_vip_list"],
+                **audio_separator_models_list["mdx23c_download_list"],
                 **model_downloads_list["roformer_download_list"],
                 **audio_separator_models_list["roformer_download_list"],
             },
@@ -444,6 +445,7 @@ class Separator:
         vip_model_repo_url_prefix = "https://github.com/Anjok0109/ai_magic/releases/download/v5"
 
         audio_separator_models_repo_url_prefix = "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs"
+        additional_models_repo_url_prefix = "https://github.com/jaysadatay/python-audio-separator/releases/download/models"
 
         yaml_config_filename = None
 
@@ -463,6 +465,11 @@ class Separator:
                     except RuntimeError:
                         self.logger.debug("Model not found in UVR repo, attempting to download from audio-separator models repo...")
                         self.download_file_if_not_exists(f"{audio_separator_models_repo_url_prefix}/{model_filename}", model_path)
+                        try:
+                            self.download_file_if_not_exists(f"{audio_separator_models_repo_url_prefix}/{model_filename}", model_path)
+                        except RuntimeError:
+                            self.logger.debug("Model not found in repos, attempting to download from jaysadatay models repo...")
+                            self.download_file_if_not_exists(f"{additional_models_repo_url_prefix}/{model_filename}", model_path)
 
                     self.print_uvr_vip_message()
 
@@ -499,8 +506,15 @@ class Separator:
                                     self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
                                 except RuntimeError:
                                     self.logger.debug("Model not found in UVR repo, attempting to download from audio-separator models repo...")
-                                    download_url = f"{audio_separator_models_repo_url_prefix}/{config_key}"
-                                    self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
+                                    try:
+                                        download_url = f"{audio_separator_models_repo_url_prefix}/{config_key}"
+                                        self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
+                                    except RuntimeError:
+                                        self.logger.debug("Model not found in repos, attempting to download from jaysadatay models repo...")
+                                        download_url = f"{additional_models_repo_url_prefix}/{config_key}"
+                                        self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
+                                    #download_url = f"{audio_separator_models_repo_url_prefix}/{config_key}"
+                                    #self.download_file_if_not_exists(download_url, os.path.join(self.model_file_dir, config_key))
 
                                 # In case the user specified the YAML filename as the model input instead of the model filename, correct that
                                 if model_filename.endswith(".yaml"):
@@ -521,8 +535,15 @@ class Separator:
                                     self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
                                 except RuntimeError:
                                     self.logger.debug("Model YAML config file not found in UVR repo, attempting to download from audio-separator models repo...")
-                                    yaml_config_url = f"{audio_separator_models_repo_url_prefix}/{yaml_config_filename}"
-                                    self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
+                                    try:
+                                        yaml_config_url = f"{audio_separator_models_repo_url_prefix}/{yaml_config_filename}"
+                                        self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
+                                    except RuntimeError:
+                                        self.logger.debug("Model YAML config file not found in repos, attempting to download from jaysadatay models repo...")
+                                        yaml_config_url = f"{additional_models_repo_url_prefix}/{yaml_config_filename}"
+                                        self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
+                                    #yaml_config_url = f"{audio_separator_models_repo_url_prefix}/{yaml_config_filename}"
+                                    #self.download_file_if_not_exists(f"{yaml_config_url}", yaml_config_filepath)
 
                             # MDX and VR models have config_value set to the model filename
                             else:
