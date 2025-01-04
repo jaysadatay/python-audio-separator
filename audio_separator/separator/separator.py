@@ -449,7 +449,7 @@ class Separator:
             self.logger.warning("Continuing without model scores")
 
         # Only show Demucs v4 models as we've only implemented support for v4
-        #filtered_demucs_v4 = {key: value for key, value in model_downloads_list["demucs_download_list"].items() if key.startswith("Demucs v4")}
+        filtered_demucs_v4 = {key: value for key, value in model_downloads_list["demucs_download_list"].items() if key.startswith("Demucs v4")}
 
         # Modified Demucs handling to use YAML files as identifiers and include download files
         demucs_models = {}
